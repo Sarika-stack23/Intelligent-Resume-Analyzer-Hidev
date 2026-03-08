@@ -1,9 +1,9 @@
 # =============================================================================
 #  🚀 INTELLIGENT RESUME ANALYZER — ADVANCED EDITION
 #  Features: ATS Checker | Resume Rewriter | Cover Letter | Interview Prep
-#            Skill Gap Roadmap | Multi-Job Matcher | RAG Chat
+#            Skill Gap Roadmap | Multi-Job Matcher | RAG Chat | 📸 Camera Scan
 #  UI: Clean White + Deep Indigo — Professional SaaS Theme
-#  Stack: LangChain 0.3.x | Groq/Llama3 | FAISS | Streamlit
+#  Stack: LangChain 0.3.x | Groq/Llama3 | FAISS | Streamlit | Tesseract OCR
 # =============================================================================
 
 import os, re, tempfile, warnings
@@ -11,6 +11,9 @@ warnings.filterwarnings("ignore")
 
 import streamlit as st
 from dotenv import load_dotenv
+from PIL import Image
+import pytesseract
+import numpy as np
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -24,6 +27,9 @@ from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 
 load_dotenv()
+
+# ── macOS: point pytesseract to Homebrew Tesseract binary ──
+pytesseract.pytesseract.tesseract_cmd = "/opt/homebrew/bin/tesseract"
 
 GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
 EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"
@@ -157,6 +163,50 @@ CUSTOM_CSS = """
     border-radius: 20px; padding: 32px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     margin: 20px 0;
+}
+
+/* ── CAMERA CARD ── */
+.camera-info-card {
+    background: linear-gradient(135deg, #f5f3ff, #eef2ff);
+    border: 1px solid #c7d2fe;
+    border-radius: 20px;
+    padding: 28px 32px;
+    margin: 16px 0 24px;
+}
+.camera-step {
+    display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;
+}
+.camera-step-num {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #4338ca, #6366f1);
+    color: white; font-weight: 700; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 2px;
+}
+.camera-step-text { font-size: 14px; color: #374151; line-height: 1.5; }
+.camera-step-text strong { color: #4338ca; }
+
+/* ── OCR PREVIEW ── */
+.ocr-preview {
+    background: #f8fafc;
+    border: 1.5px solid #e0e7ff;
+    border-radius: 16px;
+    padding: 20px;
+    font-family: 'Inter', monospace;
+    font-size: 13px;
+    color: #374151;
+    line-height: 1.6;
+    max-height: 280px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.ocr-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #dcfce7; border: 1px solid #bbf7d0;
+    border-radius: 100px; padding: 4px 12px;
+    font-size: 12px; font-weight: 600; color: #166534;
+    margin-bottom: 10px;
 }
 
 /* ── SCORE CARD ── */
@@ -435,6 +485,46 @@ def preprocess(text: str) -> str:
     text = re.sub(r" {2,}", " ", text)
     return text.strip()
 
+# =============================================================================
+#  OCR — CAMERA / IMAGE → TEXT
+# =============================================================================
+
+def enhance_image_for_ocr(pil_img: Image.Image) -> Image.Image:
+    """
+    Convert to grayscale and boost contrast for better OCR accuracy.
+    Works on both colour photos and already-greyscale scans.
+    """
+    import PIL.ImageEnhance as IE, PIL.ImageFilter as IF
+    img = pil_img.convert("L")                      # greyscale
+    img = IE.Contrast(img).enhance(2.0)             # boost contrast
+    img = IE.Sharpness(img).enhance(2.0)            # sharpen edges
+    img = img.filter(IF.MedianFilter(size=3))       # reduce noise
+    return img
+
+def ocr_image(pil_img: Image.Image) -> str:
+    """Run Tesseract OCR on a PIL image and return extracted text."""
+    try:
+        enhanced = enhance_image_for_ocr(pil_img)
+        # PSM 6 = assume uniform block of text (good for resumes)
+        config = "--psm 6 --oem 3"
+        raw = pytesseract.image_to_string(enhanced, config=config)
+        return preprocess(raw)
+    except Exception as e:
+        return f"OCR Error: {e}"
+
+def ocr_quality_check(text: str) -> tuple[bool, str]:
+    """Returns (is_good, message) based on extracted text quality."""
+    word_count = len(text.split())
+    if word_count < 30:
+        return False, f"Only {word_count} words detected — try better lighting or a flatter surface."
+    if word_count < 80:
+        return True, f"⚠️ {word_count} words detected — quality may be low. Results might be imperfect."
+    return True, f"✅ {word_count} words extracted — good quality scan!"
+
+# =============================================================================
+#  EMBEDDINGS / LLM
+# =============================================================================
+
 @st.cache_resource(show_spinner=False)
 def get_embeddings():
     return HuggingFaceEmbeddings(
@@ -631,6 +721,22 @@ RESUME: {resume_text[:3000]}
 {jobs_text}
 """)
 
+def clean_ocr_with_llm(raw_ocr_text: str) -> str:
+    """Use LLM to clean up and structure raw OCR text into a proper resume."""
+    return llm_call(f"""You are an expert resume formatter.
+The text below was extracted from a physical resume photo using OCR.
+It may contain errors, garbled words, or broken formatting.
+
+Your task:
+1. Fix OCR errors (wrong characters, broken words)
+2. Reconstruct proper resume sections (Summary, Experience, Skills, Education, etc.)
+3. Clean up spacing and punctuation
+4. Return ONLY the cleaned resume text — no commentary
+
+RAW OCR TEXT:
+{raw_ocr_text[:4000]}
+""")
+
 # =============================================================================
 #  RAG CHAT
 # =============================================================================
@@ -723,11 +829,166 @@ def render_sidebar():
                 <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">FAISS</span>
                 <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">Llama 3</span>
                 <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">Streamlit</span>
+                <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">Tesseract</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     return resume_file
+
+# =============================================================================
+#  CAMERA SCAN TAB
+# =============================================================================
+
+def render_camera_tab():
+    st.markdown(
+        '<div class="sec-header">'
+        '<div class="sec-title">📸 Scan Physical Resume</div>'
+        '<div class="sec-sub">Take a photo or upload an image of your printed resume — AI extracts and cleans the text automatically</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.divider()
+
+    # How-to card
+    st.markdown("""
+    <div class="camera-info-card">
+        <div class="camera-step">
+            <div class="camera-step-num">1</div>
+            <div class="camera-step-text"><strong>Place your resume</strong> on a flat, well-lit surface — avoid shadows and glare</div>
+        </div>
+        <div class="camera-step">
+            <div class="camera-step-num">2</div>
+            <div class="camera-step-text"><strong>Take a photo</strong> using the camera below, or upload an existing image (JPG/PNG)</div>
+        </div>
+        <div class="camera-step">
+            <div class="camera-step-num">3</div>
+            <div class="camera-step-text"><strong>Run OCR + AI Clean</strong> — Tesseract extracts text, then Llama 3 fixes errors & formats it</div>
+        </div>
+        <div class="camera-step">
+            <div class="camera-step-num">4</div>
+            <div class="camera-step-text"><strong>Use as your resume</strong> — one click loads it into all 7 features</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Input method toggle
+    input_method = st.radio(
+        "Input method",
+        ["📷 Use Camera", "🖼️ Upload Image"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    img = None
+
+    if input_method == "📷 Use Camera":
+        st.markdown("**📷 Point your camera at the resume:**")
+        camera_img = st.camera_input(
+            "Take a photo of your resume",
+            label_visibility="collapsed",
+            key="camera_snap",
+        )
+        if camera_img:
+            img = Image.open(camera_img)
+
+    else:
+        uploaded_img = st.file_uploader(
+            "Upload resume image",
+            type=["jpg", "jpeg", "png", "webp"],
+            label_visibility="collapsed",
+            key="img_upload",
+        )
+        if uploaded_img:
+            img = Image.open(uploaded_img)
+
+    if img:
+        st.divider()
+
+        # Show preview
+        col_prev, col_info = st.columns([1, 1])
+        with col_prev:
+            st.markdown("**🖼️ Captured Image**")
+            st.image(img, use_container_width=True)
+        with col_info:
+            st.markdown("**⚙️ OCR Options**")
+            auto_clean = st.toggle(
+                "✨ AI-clean extracted text with Llama 3",
+                value=True,
+                help="Fixes OCR errors, restructures sections using the LLM",
+            )
+            st.caption(f"Image size: {img.width} × {img.height} px")
+            st.caption("Higher resolution = better accuracy")
+            st.info("💡 **Tip:** Ensure text is horizontal and fills most of the frame for best results.")
+
+        st.divider()
+
+        col_btn1, col_btn2 = st.columns([1, 1])
+        with col_btn1:
+            run_ocr = st.button("🔍 Extract Text (OCR)", use_container_width=True, key="btn_ocr")
+        with col_btn2:
+            if st.session_state.get("ocr_text"):
+                load_btn = st.button("⚡ Use as My Resume", use_container_width=True, key="btn_load_ocr")
+            else:
+                st.button("⚡ Use as My Resume", use_container_width=True, key="btn_load_ocr_dis", disabled=True)
+
+        # ── RUN OCR ──
+        if run_ocr:
+            with st.spinner("Running Tesseract OCR…"):
+                raw_text = ocr_image(img)
+
+            ok, quality_msg = ocr_quality_check(raw_text)
+            st.markdown(f'<div class="ocr-badge">🔍 OCR Complete</div>', unsafe_allow_html=True)
+
+            if not ok:
+                st.error(f"⚠️ Low quality scan — {quality_msg}\nTry better lighting or upload a clearer photo.")
+                st.session_state["ocr_text"] = ""
+            else:
+                if "⚠️" in quality_msg:
+                    st.warning(quality_msg)
+                else:
+                    st.success(quality_msg)
+
+                final_text = raw_text
+
+                if auto_clean and GROQ_API_KEY:
+                    with st.spinner("✨ AI is cleaning and formatting the extracted text…"):
+                        final_text = clean_ocr_with_llm(raw_text)
+                    st.success("✅ AI cleaning complete — text has been reconstructed")
+
+                st.session_state["ocr_text"] = final_text
+
+                # Show side by side if cleaned
+                if auto_clean and GROQ_API_KEY:
+                    tab_raw, tab_clean = st.tabs(["📄 Raw OCR", "✨ AI-Cleaned"])
+                    with tab_raw:
+                        st.markdown(f'<div class="ocr-preview">{raw_text}</div>', unsafe_allow_html=True)
+                    with tab_clean:
+                        st.markdown(f'<div class="ocr-preview">{final_text}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown("**📄 Extracted Text:**")
+                    st.markdown(f'<div class="ocr-preview">{final_text}</div>', unsafe_allow_html=True)
+
+                st.download_button(
+                    "⬇️ Download Extracted Text",
+                    final_text,
+                    "scanned_resume.txt",
+                    use_container_width=True,
+                    key="dl_ocr",
+                )
+
+        # ── LOAD INTO APP ──
+        if st.session_state.get("ocr_text") and st.session_state.get("btn_load_ocr"):
+            text = st.session_state["ocr_text"]
+            with st.spinner("Building AI knowledge base from scanned resume…"):
+                _, chain = build_rag(text)
+                st.session_state.resume_text       = text
+                st.session_state.rag_chain         = chain
+                st.session_state.rag_ready         = True
+                st.session_state.chat_history      = []
+                st.session_state.display_history   = []
+            st.success("🎉 Scanned resume loaded! All 7 features are now ready to use.")
+            st.balloons()
 
 # =============================================================================
 #  MAIN
@@ -743,14 +1004,15 @@ def main():
     # Session state
     for k, v in {
         "resume_text": "", "rag_chain": None,
-        "chat_history": [], "display_history": [], "rag_ready": False,
+        "chat_history": [], "display_history": [],
+        "rag_ready": False, "ocr_text": "",
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
     resume_file = render_sidebar()
 
-    # Load + process resume
+    # Load + process resume (PDF/TXT upload)
     if resume_file:
         with st.spinner("Processing resume…"):
             new_text = preprocess(extract_resume_text(resume_file))
@@ -770,7 +1032,7 @@ def main():
         <div class="hero-title">Intelligent Resume<br><span>Analyzer</span></div>
         <div class="hero-sub">
             Get your ATS score, rewrite your resume, generate cover letters,
-            prepare for interviews, and map your skill gaps — all in one place.
+            prepare for interviews, map your skill gaps — and now scan physical resumes with your camera.
         </div>
         <div class="hero-pills">
             <span class="hero-pill">📊 ATS Checker</span>
@@ -780,6 +1042,7 @@ def main():
             <span class="hero-pill">🗺️ Skill Roadmap</span>
             <span class="hero-pill">🔀 Job Matcher</span>
             <span class="hero-pill">💬 RAG Chat</span>
+            <span class="hero-pill">📸 Camera Scan</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -815,7 +1078,8 @@ def main():
     # ── TABS ──────────────────────────────────────────────────────────────
     tabs = st.tabs([
         "📊 ATS Checker", "✍️ Resume Rewriter", "📝 Cover Letter",
-        "🎤 Interview Prep", "🗺️ Skill Roadmap", "🔀 Job Matcher", "💬 RAG Chat",
+        "🎤 Interview Prep", "🗺️ Skill Roadmap", "🔀 Job Matcher",
+        "💬 RAG Chat", "📸 Camera Scan",
     ])
 
     # ── TAB 1: ATS ────────────────────────────────────────────────────────
@@ -833,8 +1097,7 @@ def main():
                     m = re.search(r'(\d{1,3})\s*%', result)
                     if m: score_card_html(int(m.group(1)))
                     st.divider()
-                    with st.container():
-                        st.markdown(result)
+                    st.markdown(result)
                     st.divider()
                     st.download_button("⬇️ Download ATS Report", result, "ats_report.txt", use_container_width=True)
 
@@ -949,7 +1212,7 @@ def main():
         st.divider()
 
         if not st.session_state.rag_ready:
-            st.info("⬅️ Upload your resume in the sidebar to activate the chat")
+            st.info("⬅️ Upload your resume in the sidebar (or scan one in the 📸 Camera Scan tab) to activate the chat")
         else:
             st.success("✅ Resume loaded — AI is ready to answer your questions")
             st.markdown("**💡 Quick questions:**")
@@ -993,6 +1256,11 @@ def main():
                     st.session_state.chat_history    = []
                     st.session_state.display_history = []
                     st.rerun()
+
+    # ── TAB 8: CAMERA SCAN ────────────────────────────────────────────────
+    with tabs[7]:
+        render_camera_tab()
+
 
 # =============================================================================
 #  ENTRY POINT  →  streamlit run main.py
