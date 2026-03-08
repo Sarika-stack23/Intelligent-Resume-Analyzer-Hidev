@@ -1,185 +1,441 @@
 # =============================================================================
-#  Gen AI RAG Solution + ATS Resume Checker (main.py)
-#  Compatible with: langchain 0.3.x | langchain-core 0.3.x | Python 3.14
-#
-#  Install:
-#  pip install streamlit langchain==0.3.25 langchain-core langchain-community
-#             langchain-text-splitters langchain-groq langchain-huggingface
-#             sentence-transformers pypdf faiss-cpu beautifulsoup4 python-dotenv
+#  🚀 INTELLIGENT RESUME ANALYZER — ADVANCED EDITION
+#  Features: ATS Checker | Resume Rewriter | Cover Letter | Interview Prep
+#            Skill Gap Roadmap | Multi-Job Matcher | RAG Chat
+#  UI: Clean White + Deep Indigo — Professional SaaS Theme
+#  Stack: LangChain 0.3.x | Groq/Llama3 | FAISS | Streamlit
 # =============================================================================
 
-import os
-import re
-import tempfile
-import warnings
+import os, re, tempfile, warnings
 warnings.filterwarnings("ignore")
 
 import streamlit as st
 from dotenv import load_dotenv
 
-# ── Text Splitters ─────────────────────────────────────────────────────────────
-from langchain_text_splitters import (
-    RecursiveCharacterTextSplitter,
-    CharacterTextSplitter,
-    MarkdownHeaderTextSplitter,
-    HTMLHeaderTextSplitter,
-)
-
-# ── Core types ─────────────────────────────────────────────────────────────────
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-
-# ── Document loaders ───────────────────────────────────────────────────────────
-from langchain_community.document_loaders import (
-    PyPDFLoader,
-    TextLoader,
-    WebBaseLoader,
-    CSVLoader,
-)
-
-# ── Embeddings ─────────────────────────────────────────────────────────────────
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_huggingface import HuggingFaceEmbeddings
-
-# ── Vector store (FAISS — works on all Python versions) ───────────────────────
 from langchain_community.vectorstores import FAISS
-VECTOR_BACKEND = "faiss"
-
-# ── LLM ────────────────────────────────────────────────────────────────────────
 from langchain_groq import ChatGroq
 
 load_dotenv()
 
-# =============================================================================
-#  CONFIGURATION
-# =============================================================================
 GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
 EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL     = "llama3-8b-8192"
+LLM_MODEL     = "llama-3.3-70b-versatile"
 CHUNK_SIZE    = 1000
 CHUNK_OVERLAP = 150
 
 # =============================================================================
-#  STEP 1 – DATA SOURCES
+#  CUSTOM CSS — CLEAN WHITE + DEEP INDIGO PROFESSIONAL SAAS THEME
 # =============================================================================
+CUSTOM_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
 
-def load_pdf(path):
-    return PyPDFLoader(path).load()
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-def load_text(path):
-    return TextLoader(path, encoding="utf-8").load()
-
-def load_csv(path):
-    return CSVLoader(path).load()
-
-def load_word(path):
-    try:
-        from langchain_community.document_loaders import UnstructuredWordDocumentLoader
-        return UnstructuredWordDocumentLoader(path).load()
-    except Exception as e:
-        st.warning(f"Word loader error: {e}")
-        return []
-
-def load_html_file(path):
-    try:
-        from langchain_community.document_loaders import UnstructuredHTMLLoader
-        return UnstructuredHTMLLoader(path).load()
-    except Exception as e:
-        st.warning(f"HTML loader error: {e}")
-        return []
-
-def load_url(url):
-    return WebBaseLoader(url).load()
-
-def load_raw_text(text, source="manual_input"):
-    return [Document(page_content=text, metadata={"source": source})]
-
-LOADER_MAP = {
-    ".pdf":  load_pdf,
-    ".txt":  load_text,
-    ".csv":  load_csv,
-    ".docx": load_word,
-    ".html": load_html_file,
-    ".htm":  load_html_file,
+.stApp {
+    background: #f8f9fc;
+    font-family: 'Inter', sans-serif;
+    color: #1e1b4b;
 }
 
-def load_uploaded_file(uploaded_file):
+#MainMenu, footer, header { visibility: hidden; }
+.stDeployButton { display: none; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #c7d2fe; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+
+/* ── HERO ── */
+.hero-wrap {
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%);
+    border-radius: 24px;
+    padding: 56px 40px;
+    margin-bottom: 32px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(67,56,202,0.25);
+}
+.hero-wrap::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(165,180,252,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+}
+.hero-wrap::after {
+    content: '';
+    position: absolute;
+    bottom: -80px; left: -40px;
+    width: 250px; height: 250px;
+    background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%);
+    border-radius: 50%;
+}
+.hero-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 100px; padding: 6px 16px;
+    font-size: 12px; font-weight: 600; color: #c7d2fe;
+    letter-spacing: 1px; text-transform: uppercase;
+    margin-bottom: 20px;
+}
+.hero-title {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.15;
+    letter-spacing: -1px;
+    margin-bottom: 16px;
+}
+.hero-title span {
+    background: linear-gradient(90deg, #a5b4fc, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero-sub {
+    font-size: 17px; color: #a5b4fc; font-weight: 400;
+    line-height: 1.6; max-width: 560px;
+}
+.hero-pills {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px;
+}
+.hero-pill {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 100px; padding: 6px 14px;
+    font-size: 12px; color: #e0e7ff; font-weight: 500;
+}
+
+/* ── STAT CARDS ── */
+.stat-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 28px; }
+.stat-card {
+    background: #ffffff;
+    border: 1px solid #e0e7ff;
+    border-radius: 16px; padding: 20px 24px;
+    display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(67,56,202,0.06);
+    transition: all 0.2s;
+}
+.stat-card:hover { box-shadow: 0 4px 20px rgba(67,56,202,0.12); transform: translateY(-1px); }
+.stat-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: #eef2ff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0;
+}
+.stat-info {}
+.stat-value {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 20px; font-weight: 700; color: #1e1b4b;
+}
+.stat-label { font-size: 12px; color: #6b7280; font-weight: 500; margin-top: 2px; letter-spacing: 0.3px; }
+
+/* ── SECTION HEADER ── */
+.sec-header { margin-bottom: 20px; }
+.sec-title {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 22px; font-weight: 700; color: #1e1b4b;
+}
+.sec-sub { font-size: 14px; color: #6b7280; margin-top: 4px; }
+
+/* ── CARDS ── */
+.result-card {
+    background: #ffffff;
+    border: 1px solid #e0e7ff;
+    border-radius: 20px; padding: 32px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    margin: 20px 0;
+}
+
+/* ── SCORE CARD ── */
+.score-wrap {
+    background: linear-gradient(135deg, #1e1b4b, #4338ca);
+    border-radius: 20px; padding: 40px;
+    text-align: center; color: white; margin: 20px 0;
+    box-shadow: 0 12px 40px rgba(67,56,202,0.3);
+}
+.score-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: #a5b4fc; margin-bottom: 12px;
+}
+.score-num {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 80px; font-weight: 800; line-height: 1; margin: 0;
+}
+.score-grade {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 18px; font-weight: 600;
+    margin-top: 8px; letter-spacing: 1px;
+}
+.score-bar-wrap {
+    background: rgba(255,255,255,0.15);
+    border-radius: 100px; height: 8px;
+    margin: 16px auto 0; max-width: 300px; overflow: hidden;
+}
+.score-bar-fill { height: 100%; border-radius: 100px; transition: width 1s ease; }
+
+/* ── TABS ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #ffffff !important;
+    border: 1px solid #e0e7ff !important;
+    border-radius: 14px !important;
+    padding: 5px !important;
+    gap: 2px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04) !important;
+}
+.stTabs [data-baseweb="tab"] {
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-weight: 600 !important; font-size: 13px !important;
+    color: #6b7280 !important; border-radius: 10px !important;
+    padding: 8px 14px !important; transition: all 0.2s !important;
+    border: none !important;
+}
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #4338ca, #6366f1) !important;
+    color: white !important;
+    box-shadow: 0 2px 8px rgba(99,102,241,0.35) !important;
+}
+.stTabs [data-baseweb="tab"]:hover:not([aria-selected="true"]) {
+    background: #f5f3ff !important; color: #4338ca !important;
+}
+
+/* ── BUTTONS ── */
+.stButton > button {
+    background: linear-gradient(135deg, #4338ca, #6366f1) !important;
+    color: white !important; border: none !important;
+    border-radius: 12px !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-weight: 700 !important; font-size: 14px !important;
+    padding: 12px 24px !important; transition: all 0.2s !important;
+    box-shadow: 0 4px 12px rgba(99,102,241,0.3) !important;
+    letter-spacing: 0.3px !important;
+}
+.stButton > button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 20px rgba(99,102,241,0.4) !important;
+}
+.stButton > button:active { transform: translateY(0) !important; }
+
+/* ── INPUTS ── */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea {
+    background: #ffffff !important;
+    border: 1.5px solid #e0e7ff !important;
+    border-radius: 12px !important;
+    color: #1e1b4b !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 14px !important;
+    transition: all 0.2s !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+}
+.stTextInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.12) !important;
+}
+.stTextInput > div > div > input::placeholder,
+.stTextArea > div > div > textarea::placeholder { color: #9ca3af !important; }
+
+/* ── FILE UPLOADER ── */
+.stFileUploader > div {
+    background: #fafafa !important;
+    border: 2px dashed #c7d2fe !important;
+    border-radius: 16px !important;
+    transition: all 0.2s !important;
+}
+.stFileUploader > div:hover {
+    border-color: #6366f1 !important;
+    background: #f5f3ff !important;
+}
+
+/* ── SELECTBOX ── */
+.stSelectbox > div > div {
+    background: #ffffff !important;
+    border: 1.5px solid #e0e7ff !important;
+    border-radius: 12px !important;
+    color: #1e1b4b !important;
+}
+
+/* ── SIDEBAR ── */
+section[data-testid="stSidebar"] {
+    background: #ffffff !important;
+    border-right: 1px solid #e0e7ff !important;
+}
+section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
+
+/* ── ALERTS ── */
+.stSuccess {
+    background: #f0fdf4 !important; border: 1px solid #bbf7d0 !important;
+    border-radius: 12px !important; color: #166534 !important;
+}
+.stError {
+    background: #fef2f2 !important; border: 1px solid #fecaca !important;
+    border-radius: 12px !important; color: #991b1b !important;
+}
+.stWarning {
+    background: #fffbeb !important; border: 1px solid #fde68a !important;
+    border-radius: 12px !important; color: #92400e !important;
+}
+.stInfo {
+    background: #eff6ff !important; border: 1px solid #bfdbfe !important;
+    border-radius: 12px !important; color: #1e40af !important;
+}
+
+/* ── PROGRESS ── */
+.stProgress > div > div > div {
+    background: linear-gradient(90deg, #4338ca, #6366f1) !important;
+    border-radius: 100px !important;
+}
+.stProgress > div > div {
+    background: #e0e7ff !important; border-radius: 100px !important;
+}
+
+/* ── CHAT ── */
+.stChatMessage {
+    background: #ffffff !important;
+    border: 1px solid #e0e7ff !important;
+    border-radius: 16px !important; margin-bottom: 10px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04) !important;
+    color: #1e1b4b !important;
+}
+.stChatMessage p, .stChatMessage div,
+.stChatMessage span, .stChatMessage li { color: #1e1b4b !important; }
+[data-testid="stChatMessageContent"] { color: #1e1b4b !important; }
+[data-testid="stChatMessageContent"] * { color: #1e1b4b !important; }
+[data-testid="stChatInput"] {
+    background: #ffffff !important;
+    border: 1.5px solid #e0e7ff !important;
+    border-radius: 12px !important; color: #1e1b4b !important;
+}
+
+/* ── SIDEBAR FILE UPLOADER FIX ── */
+section[data-testid="stSidebar"] .stFileUploader > div {
+    background: #f5f3ff !important;
+    border: 2px dashed #c7d2fe !important;
+    border-radius: 16px !important;
+}
+section[data-testid="stSidebar"] .stFileUploader p,
+section[data-testid="stSidebar"] .stFileUploader span,
+section[data-testid="stSidebar"] .stFileUploader div {
+    color: #4338ca !important;
+}
+section[data-testid="stSidebar"] .stFileUploader button {
+    background: #4338ca !important; color: white !important;
+    border: none !important; border-radius: 8px !important;
+}
+
+/* ── METRICS ── */
+[data-testid="stMetric"] {
+    background: #ffffff; border: 1px solid #e0e7ff;
+    border-radius: 16px; padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+[data-testid="stMetricLabel"] { color: #6b7280 !important; font-size: 12px !important; }
+[data-testid="stMetricValue"] { color: #1e1b4b !important; font-family: 'Plus Jakarta Sans',sans-serif !important; font-weight: 700 !important; }
+
+/* ── DOWNLOAD ── */
+.stDownloadButton > button {
+    background: #f5f3ff !important;
+    border: 1.5px solid #c7d2fe !important;
+    color: #4338ca !important; border-radius: 12px !important;
+    font-weight: 600 !important;
+}
+.stDownloadButton > button:hover {
+    background: linear-gradient(135deg, #4338ca, #6366f1) !important;
+    color: white !important; border-color: transparent !important;
+}
+
+/* ── EXPANDER ── */
+.streamlit-expanderHeader {
+    background: #f8f9fc !important;
+    border: 1px solid #e0e7ff !important;
+    border-radius: 12px !important;
+    color: #4338ca !important; font-weight: 600 !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+/* ── DIVIDER ── */
+hr {
+    border: none !important; height: 1px !important;
+    background: #e0e7ff !important; margin: 24px 0 !important;
+}
+
+/* ── SPINNER ── */
+.stSpinner > div { border-top-color: #6366f1 !important; }
+
+/* ── FEATURE CHIP ── */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.chip {
+    background: #f5f3ff; border: 1px solid #c7d2fe;
+    border-radius: 100px; padding: 6px 14px;
+    font-size: 13px; font-weight: 500; color: #4338ca;
+    cursor: pointer; transition: all 0.2s;
+}
+.chip:hover { background: #4338ca; color: white; }
+
+/* ── SIDEBAR LOGO ── */
+.sidebar-logo {
+    background: linear-gradient(135deg, #1e1b4b, #4338ca);
+    border-radius: 0 0 20px 20px;
+    padding: 28px 20px 24px;
+    margin-bottom: 4px;
+    text-align: center;
+}
+.sidebar-brand {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 18px; font-weight: 800; color: white; letter-spacing: -0.5px;
+}
+.sidebar-tagline {
+    font-size: 10px; color: #a5b4fc;
+    letter-spacing: 2px; text-transform: uppercase;
+    margin-top: 4px;
+}
+
+/* ── JOB CARD ── */
+.job-col-header {
+    background: linear-gradient(135deg, #f5f3ff, #eef2ff);
+    border: 1px solid #e0e7ff; border-radius: 12px;
+    padding: 12px 16px; margin-bottom: 12px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 700; color: #4338ca; font-size: 15px;
+}
+</style>
+"""
+
+# =============================================================================
+#  HELPERS
+# =============================================================================
+
+def load_pdf(path):   return PyPDFLoader(path).load()
+def load_text(path):  return TextLoader(path, encoding="utf-8").load()
+
+def extract_resume_text(uploaded_file) -> str:
     suffix = os.path.splitext(uploaded_file.name)[-1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded_file.getbuffer())
         tmp_path = tmp.name
-    loader_fn = LOADER_MAP.get(suffix)
-    if loader_fn:
-        return loader_fn(tmp_path)
-    st.warning(f"Unsupported file type: {suffix}")
-    return []
+    docs = load_pdf(tmp_path) if suffix == ".pdf" else load_text(tmp_path)
+    return "\n".join(d.page_content for d in docs)
 
-# =============================================================================
-#  STEP 2 – DATA PREPROCESSING
-# =============================================================================
+def preprocess(text: str) -> str:
+    text = re.sub(r"[^\x20-\x7E\n\t]", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r" {2,}", " ", text)
+    return text.strip()
 
-def preprocess_documents(docs):
-    cleaned = []
-    for doc in docs:
-        text = doc.page_content
-        text = re.sub(r"[^\x20-\x7E\n\t]", " ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        text = re.sub(r" {2,}", " ", text)
-        text = text.strip()
-        if len(text) >= 30:
-            doc.page_content = text
-            cleaned.append(doc)
-    return cleaned
-
-# =============================================================================
-#  STEP 3 – SPLITTING & CHUNKING
-# =============================================================================
-
-def split_documents(docs, strategy="recursive"):
-    if strategy == "recursive":
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
-            separators=["\n\n", "\n", ". ", " ", ""],
-        )
-        return splitter.split_documents(docs)
-    elif strategy == "character":
-        splitter = CharacterTextSplitter(
-            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, separator="\n"
-        )
-        return splitter.split_documents(docs)
-    elif strategy == "token":
-        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            model_name="gpt-3.5-turbo", chunk_size=300, chunk_overlap=50
-        )
-        return splitter.split_documents(docs)
-    elif strategy == "markdown":
-        headers = [("#", "H1"), ("##", "H2"), ("###", "H3")]
-        md_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=headers, strip_headers=False
-        )
-        chunks = []
-        for doc in docs:
-            chunks.extend(md_splitter.split_text(doc.page_content))
-        return chunks
-    elif strategy == "html":
-        headers = [("h1", "H1"), ("h2", "H2"), ("h3", "H3")]
-        html_splitter = HTMLHeaderTextSplitter(headers_to_split_on=headers)
-        chunks = []
-        for doc in docs:
-            chunks.extend(html_splitter.split_text(doc.page_content))
-        return chunks
-    else:
-        return RecursiveCharacterTextSplitter(
-            chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
-        ).split_documents(docs)
-
-# =============================================================================
-#  STEP 4 – EMBEDDINGS + VECTOR DB
-# =============================================================================
-
-@st.cache_resource(show_spinner="Loading embedding model…")
+@st.cache_resource(show_spinner=False)
 def get_embeddings():
     return HuggingFaceEmbeddings(
         model_name=EMBED_MODEL,
@@ -187,382 +443,556 @@ def get_embeddings():
         encode_kwargs={"normalize_embeddings": True},
     )
 
-def build_vector_store(chunks, embeddings):
-    if not chunks:
-        st.error("No chunks to embed.")
-        return None
-    vectordb = FAISS.from_documents(documents=chunks, embedding=embeddings)
-    return vectordb.as_retriever(search_type="similarity", search_kwargs={"k": 4})
+def get_llm():
+    return ChatGroq(groq_api_key=GROQ_API_KEY, model_name=LLM_MODEL,
+                    temperature=0.3, max_tokens=2048)
+
+def llm_call(prompt: str) -> str:
+    return get_llm().invoke(prompt).content
 
 # =============================================================================
-#  STEP 5 – LLM + RAG CHAIN
+#  FEATURE FUNCTIONS
 # =============================================================================
 
-def get_llm(api_key):
-    return ChatGroq(
-        groq_api_key=api_key,
-        model_name=LLM_MODEL,
-        temperature=0.3,
-        max_tokens=1024,
+def ats_analysis(resume_text, job_desc):
+    return llm_call(f"""You are a world-class ATS analyst and career coach.
+Analyse the resume against the job description. Respond with EXACTLY this format:
+
+## ATS MATCH SCORE
+**Score: [NUMBER]%**
+One sentence explaining the score.
+
+## MATCHING KEYWORDS & SKILLS
+List every keyword/skill from the JD that IS in the resume. One per line starting with ✅
+
+## MISSING KEYWORDS & SKILLS
+List every important keyword/skill from the JD that is MISSING. One per line starting with ❌
+
+## SECTION SCORES
+Rate each section out of 10:
+- **Summary/Objective:** X/10 — reason
+- **Work Experience:** X/10 — reason
+- **Skills Section:** X/10 — reason
+- **Education:** X/10 — reason
+- **Formatting & ATS Compatibility:** X/10 — reason
+
+## TOP 7 IMPROVEMENTS
+Number each 1-7. Be very specific — mention exact changes to make.
+
+## OVERALL VERDICT
+2-3 sentences. Be direct and honest.
+
+---
+RESUME: {resume_text[:4000]}
+JOB DESCRIPTION: {job_desc[:2000]}
+""")
+
+def rewrite_resume(resume_text, job_desc):
+    return llm_call(f"""You are an expert resume writer.
+Rewrite the resume to better match the job using STAR format, metrics, and action verbs.
+
+## ✨ IMPROVED PROFESSIONAL SUMMARY
+[Rewritten — 3-4 powerful sentences]
+
+## 💼 STRENGTHENED EXPERIENCE BULLETS
+For each role:
+**[Job Title] at [Company]**
+- BEFORE: [original]
+  AFTER:  [improved with metrics]
+
+## 🎯 OPTIMISED SKILLS SECTION
+[Reorganised and expanded with missing keywords]
+
+## 📋 ADDITIONAL RECOMMENDATIONS
+3-5 specific structural improvements
+
+---
+RESUME: {resume_text[:4000]}
+JOB DESCRIPTION: {job_desc[:2000]}
+""")
+
+def generate_cover_letter(resume_text, job_desc, tone):
+    tone_map = {
+        "Professional & Formal":  "formal, structured, traditional corporate",
+        "Confident & Bold":       "confident, assertive, shows strong ambition",
+        "Creative & Engaging":    "engaging storytelling, shows creativity and passion",
+    }
+    return llm_call(f"""Write a compelling cover letter. Tone: {tone_map[tone]}
+Rules:
+- 3-4 paragraphs, 250-350 words
+- Opening: hook, mention specific role
+- Body: connect 2-3 resume achievements to job requirements
+- Closing: strong call to action
+- Sound human, NOT AI-generated
+- Never use: "I am writing to express my interest"
+
+Format:
+[Date]
+Dear Hiring Manager,
+[paragraphs]
+Sincerely,
+[Candidate Name]
+
+---
+RESUME: {resume_text[:3000]}
+JOB DESCRIPTION: {job_desc[:2000]}
+""")
+
+def generate_interview_prep(resume_text, job_desc):
+    return llm_call(f"""You are a senior interviewer at a top company.
+
+## 🎯 TOP 5 TECHNICAL QUESTIONS
+**Q[N]: [Question]**
+Why asked: [reason]
+Strong answer approach: [using candidate background]
+
+## 🤝 TOP 5 BEHAVIOURAL QUESTIONS
+**Q[N]: [Question]**
+What tested: [reason]
+STAR framework: [approach based on resume]
+
+## 🧠 TOP 3 SITUATIONAL QUESTIONS
+**Q[N]: [Question]**
+How to approach: [strategy]
+
+## ❓ 5 SMART QUESTIONS TO ASK INTERVIEWER
+
+## ✅ QUICK PREP CHECKLIST
+- [ ] Research the company
+- [ ] Prepare "Tell me about yourself" (2 min)
+- [ ] Have 3 achievement stories ready
+- [ ] Know salary expectations
+- [ ] Prepare your own questions
+
+---
+RESUME: {resume_text[:3000]}
+JOB DESCRIPTION: {job_desc[:2000]}
+""")
+
+def generate_skill_roadmap(resume_text, job_desc):
+    return llm_call(f"""You are a senior tech career advisor.
+
+## 📊 SKILL GAP ANALYSIS
+### ✅ Skills You Already Have
+[skill — level: Beginner/Intermediate/Advanced]
+
+### ❌ Critical Missing Skills
+[skill — why critical]
+
+### ⚠️ Nice to Have
+[skill — priority]
+
+## 🗺️ 90-DAY LEARNING ROADMAP
+### Week 1-2: Quick Wins
+- Skill: [name]
+  Resource: [exact name + type]
+  Time: [hours]
+  Project: [mini project]
+
+### Week 3-6: Core Skills [same format]
+### Week 7-10: Advanced [same format]
+### Week 11-12: Portfolio Projects
+- Project 1: [name + skills demonstrated]
+- Project 2: [name + skills demonstrated]
+
+## ⏱️ JOB-READY TIMELINE
+## 🆓 TOP 3 FREE PLATFORMS
+
+---
+RESUME: {resume_text[:3000]}
+JOB DESCRIPTION: {job_desc[:2000]}
+""")
+
+def multi_job_match(resume_text, jobs):
+    jobs_text = "".join(
+        f"\nJOB {i} — {j['title']}:\n{j['desc'][:800]}\n"
+        for i, j in enumerate(jobs, 1)
     )
+    return llm_call(f"""You are an expert career advisor.
 
-PROMPT = ChatPromptTemplate.from_messages([
-    ("system",
-     "You are a helpful AI assistant. Answer ONLY using the context below.\n"
-     "If the answer is not in the context, say: "
-     "'I don't have enough information to answer that.'\n\n"
-     "Context:\n{context}"),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{question}"),
-])
+## 🏆 RANKING (Best Match First)
+Rank jobs best to worst fit.
 
-def format_docs(docs):
-    return "\n\n".join(d.page_content for d in docs)
+## 📊 DETAILED COMPARISON
+For each job:
+**Job [N]: [Title]**
+- Match Score: X%
+- Strongest Points: [2-3]
+- Weakest Points: [2-3]
+- Effort to compete: Low / Medium / High
 
-def build_rag_chain(retriever, llm):
+## 🎯 RECOMMENDATION
+Which to apply first and why. Be specific.
+
+## 📋 TOP 3 RESUME TWEAKS PER JOB
+
+---
+RESUME: {resume_text[:3000]}
+{jobs_text}
+""")
+
+# =============================================================================
+#  RAG CHAT
+# =============================================================================
+
+def build_rag(text: str):
+    docs = [Document(page_content=preprocess(text), metadata={"source": "resume"})]
+    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+    chunks = splitter.split_documents(docs)
+    vectordb = FAISS.from_documents(chunks, get_embeddings())
+    retriever = vectordb.as_retriever(search_kwargs={"k": 4})
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an intelligent career assistant. Answer ONLY from this context:\n\n{context}"),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{question}"),
+    ])
     chain = (
         RunnablePassthrough.assign(
             context=RunnableLambda(
-                lambda x: format_docs(retriever.invoke(x["question"]))
+                lambda x: "\n\n".join(d.page_content for d in retriever.invoke(x["question"]))
             )
-        )
-        | PROMPT
-        | llm
-        | StrOutputParser()
+        ) | prompt | get_llm() | StrOutputParser()
     )
-    return chain
+    return retriever, chain
 
 # =============================================================================
-#  SIDEBAR
+#  UI HELPERS
 # =============================================================================
+
+def score_card_html(score: int):
+    score = min(score, 100)
+    if score >= 75:   color, grade, emoji = "#10b981", "Strong Match",   "🟢"
+    elif score >= 50: color, grade, emoji = "#f59e0b", "Moderate Match", "🟡"
+    else:             color, grade, emoji = "#ef4444", "Weak Match",     "🔴"
+    st.markdown(f"""
+    <div class="score-wrap">
+        <div class="score-label">ATS MATCH SCORE</div>
+        <div class="score-num">{score}%</div>
+        <div class="score-grade">{emoji} {grade}</div>
+        <div class="score-bar-wrap">
+            <div class="score-bar-fill" style="width:{score}%;background:{color};"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def check_ready() -> bool:
+    if not GROQ_API_KEY:
+        st.error("⚠️ Add GROQ_API_KEY to your .env file")
+        return False
+    if not st.session_state.resume_text:
+        st.warning("⬅️ Upload your resume in the sidebar first")
+        return False
+    return True
+
+def jd_input(key, height=200):
+    return st.text_area("📋 Paste Job Description", height=height, key=key,
+                        placeholder="Paste the full job description here…")
 
 def render_sidebar():
-    st.sidebar.title("⚙️ Configuration")
+    with st.sidebar:
+        st.markdown("""
+        <div class="sidebar-logo">
+            <div class="sidebar-brand">⚡ IRA</div>
+            <div class="sidebar-tagline">Intelligent Resume Analyzer</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # API key status
-    if GROQ_API_KEY:
-        st.sidebar.success("🔑 API Key loaded from .env")
-    else:
-        st.sidebar.error("⚠️ GROQ_API_KEY not found in .env")
-    st.sidebar.divider()
+        st.markdown("#### 🔑 API Status")
+        if GROQ_API_KEY:
+            st.success("API Key Active")
+        else:
+            st.error("Add GROQ_API_KEY to .env")
 
-    st.sidebar.subheader("📂 Step 1 – Data Sources")
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload files (PDF, TXT, CSV, DOCX, HTML)",
-        type=["pdf", "txt", "csv", "docx", "html", "htm"],
-        accept_multiple_files=True,
-    )
-    web_url  = st.sidebar.text_input("Or paste a URL to scrape", placeholder="https://…")
-    raw_text = st.sidebar.text_area("Or paste raw text", height=100)
-    st.sidebar.divider()
+        st.divider()
 
-    st.sidebar.subheader("✂️ Step 3 – Chunking Strategy")
-    strategy = st.sidebar.selectbox(
-        "Splitter", ["recursive", "character", "token", "markdown", "html"], index=0
-    )
+        st.markdown("#### 📂 Upload Resume")
+        resume_file = st.file_uploader(
+            "PDF or TXT", type=["pdf","txt"], label_visibility="collapsed"
+        )
+        if resume_file:
+            st.success(f"✅ {resume_file.name}")
 
-    build_btn = st.sidebar.button("🚀 Build Knowledge Base", use_container_width=True)
+        st.divider()
 
-    return {
-        "uploaded_files": uploaded_files,
-        "web_url":        web_url,
-        "raw_text":       raw_text,
-        "strategy":       strategy,
-        "build_btn":      build_btn,
-    }
+        st.markdown("""
+        <div style="padding:12px 4px;">
+            <div style="font-size:11px;color:#9ca3af;font-weight:600;letter-spacing:1px;margin-bottom:10px;">POWERED BY</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">LangChain</span>
+                <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">Groq</span>
+                <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">FAISS</span>
+                <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">Llama 3</span>
+                <span style="background:#f5f3ff;border:1px solid #e0e7ff;border-radius:8px;padding:3px 10px;font-size:11px;color:#4338ca;font-weight:600;">Streamlit</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-# =============================================================================
-#  INGEST DATA (Steps 1-3)
-# =============================================================================
-
-def ingest_data(cfg):
-    raw_docs = []
-    for uf in cfg["uploaded_files"]:
-        with st.spinner(f"Loading {uf.name}…"):
-            raw_docs.extend(load_uploaded_file(uf))
-    if cfg["web_url"].strip():
-        with st.spinner(f"Scraping {cfg['web_url']}…"):
-            try:
-                raw_docs.extend(load_url(cfg["web_url"].strip()))
-            except Exception as e:
-                st.warning(f"URL load failed: {e}")
-    if cfg["raw_text"].strip():
-        raw_docs.extend(load_raw_text(cfg["raw_text"].strip()))
-    if not raw_docs:
-        return []
-    with st.spinner("Step 2 – Preprocessing…"):
-        cleaned = preprocess_documents(raw_docs)
-    with st.spinner(f"Step 3 – Chunking ({cfg['strategy']})…"):
-        chunks = split_documents(cleaned, strategy=cfg["strategy"])
-    return chunks
+    return resume_file
 
 # =============================================================================
-#  ATS CHECKER HELPER
-# =============================================================================
-
-def run_ats_analysis(resume_text: str, job_desc: str, api_key: str) -> str:
-    prompt = f"""You are an expert ATS (Applicant Tracking System) analyst and career coach.
-
-Analyse the resume below against the job description and respond with EXACTLY this structure:
-
-## ATS Match Score
-Give a single percentage score (0-100%) based on keyword overlap, skills match, experience relevance, and formatting. Write it clearly like: **Score: 72%**
-
-## ✅ Matching Keywords & Skills
-List the keywords and skills from the job description that ARE present in the resume (bullet points).
-
-## ❌ Missing Keywords & Skills
-List important keywords and skills from the job description that are MISSING from the resume (bullet points).
-
-## 📈 What to Improve
-Give 5-7 specific, actionable improvements the candidate should make to their resume to better match this job. Be concrete — mention exact sections, wording, or skills to add.
-
-## 💡 Overall Recommendation
-A 2-3 sentence summary of the candidate's fit and their single most important action to take.
-
----
-RESUME:
-{resume_text[:4000]}
-
----
-JOB DESCRIPTION:
-{job_desc[:2000]}
-"""
-    llm = get_llm(api_key)
-    result = llm.invoke(prompt)
-    return result.content
-
-# =============================================================================
-#  MAIN APP
+#  MAIN
 # =============================================================================
 
 def main():
     st.set_page_config(
-        page_title="Gen AI RAG + ATS Checker",
-        page_icon="🤖",
-        layout="wide",
+        page_title="Intelligent Resume Analyzer",
+        page_icon="⚡", layout="wide",
     )
-    st.title("🤖 Gen AI RAG Assistant + ATS Resume Checker")
-    st.caption("Pipeline: Data Sources → Preprocessing → Chunking → Embeddings → FAISS → Groq/Llama3")
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
     # Session state
-    defaults = {
-        "retriever":       None,
-        "rag_chain":       None,
-        "chat_history":    [],
-        "display_history": [],
-        "kb_ready":        False,
-        "chunk_count":     0,
-    }
-    for k, v in defaults.items():
+    for k, v in {
+        "resume_text": "", "rag_chain": None,
+        "chat_history": [], "display_history": [], "rag_ready": False,
+    }.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-    api_key = GROQ_API_KEY
-    cfg     = render_sidebar()
+    resume_file = render_sidebar()
 
-    # ── Build Knowledge Base ─────────────────────────────────────────────────
-    if cfg["build_btn"]:
-        if not api_key:
-            st.sidebar.error("⚠️ No API key. Add GROQ_API_KEY to your .env file.")
-        else:
-            chunks = ingest_data(cfg)
-            if not chunks:
-                st.sidebar.warning("No data loaded. Add files, a URL, or paste text.")
-            else:
-                with st.spinner("Step 4 – Embedding & building FAISS store…"):
-                    embeddings = get_embeddings()
-                    retriever  = build_vector_store(chunks, embeddings)
-                if retriever:
-                    with st.spinner("Step 5 – Initialising AI engine…"):
-                        llm   = get_llm(api_key)
-                        chain = build_rag_chain(retriever, llm)
-                    st.session_state.retriever       = retriever
-                    st.session_state.rag_chain       = chain
-                    st.session_state.kb_ready        = True
-                    st.session_state.chunk_count     = len(chunks)
-                    st.session_state.chat_history    = []
-                    st.session_state.display_history = []
-                    st.sidebar.success(f"✅ Ready! ({len(chunks)} chunks | FAISS)")
-
-    # ── Tabs ─────────────────────────────────────────────────────────────────
-    tab_chat, tab_ats = st.tabs(["💬 RAG Chat", "📊 ATS Resume Checker"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    # TAB 1 — RAG CHAT
-    # ════════════════════════════════════════════════════════════════════════
-    with tab_chat:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Knowledge Base", "✅ Ready" if st.session_state.kb_ready else "⏳ Not Built")
-        c2.metric("Chunks Indexed", st.session_state.chunk_count)
-        c3.metric("Vector Backend", "FAISS")
-        st.divider()
-
-        st.subheader("💬 Chat with your Knowledge Base")
-
-        for msg in st.session_state.display_history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        user_input = st.chat_input(
-            "Ask a question about your documents…",
-            disabled=not st.session_state.kb_ready,
-        )
-
-        if user_input:
-            st.session_state.display_history.append({"role": "user", "content": user_input})
-            with st.chat_message("user"):
-                st.markdown(user_input)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking…"):
-                    try:
-                        answer  = st.session_state.rag_chain.invoke({
-                            "question":     user_input,
-                            "chat_history": st.session_state.chat_history,
-                        })
-                        sources = st.session_state.retriever.invoke(user_input)
-                    except Exception as e:
-                        answer  = f"❌ Error: {e}"
-                        sources = []
-                st.markdown(answer)
-                if sources:
-                    with st.expander("📄 Source References"):
-                        for i, src in enumerate(sources, 1):
-                            label = src.metadata.get("source", f"chunk {i}")
-                            st.markdown(f"**[{i}] {label}**")
-                            st.caption(src.page_content[:300] + "…")
-
-            st.session_state.chat_history.append(HumanMessage(content=user_input))
-            st.session_state.chat_history.append(AIMessage(content=answer))
-            st.session_state.display_history.append({"role": "assistant", "content": answer})
-
-        if st.session_state.display_history:
-            if st.button("🗑️ Clear Chat History"):
+    # Load + process resume
+    if resume_file:
+        with st.spinner("Processing resume…"):
+            new_text = preprocess(extract_resume_text(resume_file))
+        if new_text != st.session_state.resume_text:
+            st.session_state.resume_text = new_text
+            with st.spinner("Building AI knowledge base…"):
+                _, chain = build_rag(new_text)
+                st.session_state.rag_chain       = chain
+                st.session_state.rag_ready       = True
                 st.session_state.chat_history    = []
                 st.session_state.display_history = []
-                st.rerun()
 
-        with st.expander("🔍 Pipeline Architecture"):
-            st.markdown("""
-| Step | Component | Tool |
-|------|-----------|------|
-| 1 | Data Sources | PyPDFLoader, WebBaseLoader, TextLoader, CSVLoader |
-| 2 | Preprocessing | Regex cleaning, whitespace normalization, empty-page filter |
-| 3 | Chunking | RecursiveCharacterTextSplitter (+ Markdown / HTML / Token / Character) |
-| 4 | Embeddings | `all-MiniLM-L6-v2` via HuggingFace (free) |
-| 4 | Vector DB | FAISS (in-memory, Python 3.14 compatible) |
-| 5 | LLM | Llama 3 8B via Groq (free) |
-| 5 | Chain | LCEL — RunnablePassthrough + RunnableLambda |
-| 5 | Memory | HumanMessage / AIMessage (in-session) |
-| 6 | UI | Streamlit |
-            """)
+    # ── HERO ──────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="hero-wrap">
+        <div class="hero-badge">✦ AI-Powered Career Platform</div>
+        <div class="hero-title">Intelligent Resume<br><span>Analyzer</span></div>
+        <div class="hero-sub">
+            Get your ATS score, rewrite your resume, generate cover letters,
+            prepare for interviews, and map your skill gaps — all in one place.
+        </div>
+        <div class="hero-pills">
+            <span class="hero-pill">📊 ATS Checker</span>
+            <span class="hero-pill">✍️ Resume Rewriter</span>
+            <span class="hero-pill">📝 Cover Letter</span>
+            <span class="hero-pill">🎤 Interview Prep</span>
+            <span class="hero-pill">🗺️ Skill Roadmap</span>
+            <span class="hero-pill">🔀 Job Matcher</span>
+            <span class="hero-pill">💬 RAG Chat</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # ════════════════════════════════════════════════════════════════════════
-    # TAB 2 — ATS RESUME CHECKER
-    # ════════════════════════════════════════════════════════════════════════
-    with tab_ats:
-        st.subheader("📊 ATS Resume Checker")
-        st.caption("Upload your resume + paste a job description → get ATS match % and improvement tips")
+    # ── STATS ─────────────────────────────────────────────────────────────
+    has_resume = bool(st.session_state.resume_text)
+    st.markdown(f"""
+    <div class="stat-row">
+        <div class="stat-card">
+            <div class="stat-icon">📄</div>
+            <div class="stat-info">
+                <div class="stat-value">{"Loaded ✓" if has_resume else "Not yet"}</div>
+                <div class="stat-label">Resume Status</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🤖</div>
+            <div class="stat-info">
+                <div class="stat-value">{"Active ✓" if GROQ_API_KEY else "Offline"}</div>
+                <div class="stat-label">AI Engine (Llama 3)</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🧠</div>
+            <div class="stat-info">
+                <div class="stat-value">{"Ready ✓" if st.session_state.rag_ready else "Standby"}</div>
+                <div class="stat-label">RAG Knowledge Base</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── TABS ──────────────────────────────────────────────────────────────
+    tabs = st.tabs([
+        "📊 ATS Checker", "✍️ Resume Rewriter", "📝 Cover Letter",
+        "🎤 Interview Prep", "🗺️ Skill Roadmap", "🔀 Job Matcher", "💬 RAG Chat",
+    ])
+
+    # ── TAB 1: ATS ────────────────────────────────────────────────────────
+    with tabs[0]:
+        st.markdown('<div class="sec-header"><div class="sec-title">📊 ATS Resume Checker</div><div class="sec-sub">Analyse your resume match score, missing keywords, and section-by-section scoring</div></div>', unsafe_allow_html=True)
+        st.divider()
+        jd = jd_input("jd_ats")
+        if st.button("⚡ Run ATS Analysis", use_container_width=True, key="btn_ats"):
+            if check_ready():
+                if not jd.strip():
+                    st.warning("Please paste a job description")
+                else:
+                    with st.spinner("Analysing with AI… (~15 seconds)"):
+                        result = ats_analysis(st.session_state.resume_text, jd)
+                    m = re.search(r'(\d{1,3})\s*%', result)
+                    if m: score_card_html(int(m.group(1)))
+                    st.divider()
+                    with st.container():
+                        st.markdown(result)
+                    st.divider()
+                    st.download_button("⬇️ Download ATS Report", result, "ats_report.txt", use_container_width=True)
+
+    # ── TAB 2: REWRITER ───────────────────────────────────────────────────
+    with tabs[1]:
+        st.markdown('<div class="sec-header"><div class="sec-title">✍️ AI Resume Rewriter</div><div class="sec-sub">STAR format bullets, quantified metrics, and keyword injection</div></div>', unsafe_allow_html=True)
+        st.divider()
+        jd = jd_input("jd_rewrite")
+        if st.button("✨ Rewrite My Resume", use_container_width=True, key="btn_rewrite"):
+            if check_ready():
+                if not jd.strip():
+                    st.warning("Please paste a job description")
+                else:
+                    with st.spinner("Rewriting your resume…"):
+                        result = rewrite_resume(st.session_state.resume_text, jd)
+                    st.markdown(result)
+                    st.divider()
+                    st.download_button("⬇️ Download Rewritten Resume", result, "rewritten_resume.txt", use_container_width=True)
+
+    # ── TAB 3: COVER LETTER ───────────────────────────────────────────────
+    with tabs[2]:
+        st.markdown('<div class="sec-header"><div class="sec-title">📝 Cover Letter Generator</div><div class="sec-sub">Personalised, human-sounding cover letter tailored to the job</div></div>', unsafe_allow_html=True)
+        st.divider()
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            jd = jd_input("jd_cover")
+        with col2:
+            st.markdown("**Tone & Style**")
+            tone = st.selectbox("Tone", [
+                "Professional & Formal", "Confident & Bold", "Creative & Engaging"
+            ], label_visibility="collapsed")
+            st.caption("**Professional** — Corporate, structured")
+            st.caption("**Confident** — Bold, assertive")
+            st.caption("**Creative** — Story-driven, engaging")
+        if st.button("📝 Generate Cover Letter", use_container_width=True, key="btn_cover"):
+            if check_ready():
+                if not jd.strip():
+                    st.warning("Please paste a job description")
+                else:
+                    with st.spinner("Crafting your cover letter…"):
+                        result = generate_cover_letter(st.session_state.resume_text, jd, tone)
+                    st.markdown(result)
+                    st.divider()
+                    st.download_button("⬇️ Download Cover Letter", result, "cover_letter.txt", use_container_width=True)
+
+    # ── TAB 4: INTERVIEW ──────────────────────────────────────────────────
+    with tabs[3]:
+        st.markdown('<div class="sec-header"><div class="sec-title">🎤 Interview Preparation</div><div class="sec-sub">Personalised questions with AI-suggested answers based on your resume</div></div>', unsafe_allow_html=True)
+        st.divider()
+        jd = jd_input("jd_interview")
+        if st.button("🎤 Generate Interview Prep", use_container_width=True, key="btn_interview"):
+            if check_ready():
+                if not jd.strip():
+                    st.warning("Please paste a job description")
+                else:
+                    with st.spinner("Preparing your interview guide…"):
+                        result = generate_interview_prep(st.session_state.resume_text, jd)
+                    st.markdown(result)
+                    st.divider()
+                    st.download_button("⬇️ Download Interview Guide", result, "interview_prep.txt", use_container_width=True)
+
+    # ── TAB 5: ROADMAP ────────────────────────────────────────────────────
+    with tabs[4]:
+        st.markdown('<div class="sec-header"><div class="sec-title">🗺️ Skill Gap Roadmap</div><div class="sec-sub">90-day personalised learning roadmap with free resources and projects</div></div>', unsafe_allow_html=True)
+        st.divider()
+        jd = jd_input("jd_roadmap")
+        if st.button("🗺️ Generate My Roadmap", use_container_width=True, key="btn_roadmap"):
+            if check_ready():
+                if not jd.strip():
+                    st.warning("Please paste a job description")
+                else:
+                    with st.spinner("Building your personalised roadmap…"):
+                        result = generate_skill_roadmap(st.session_state.resume_text, jd)
+                    st.markdown(result)
+                    st.divider()
+                    st.download_button("⬇️ Download Roadmap", result, "skill_roadmap.txt", use_container_width=True)
+
+    # ── TAB 6: JOB MATCHER ────────────────────────────────────────────────
+    with tabs[5]:
+        st.markdown('<div class="sec-header"><div class="sec-title">🔀 Multi-Job Matcher</div><div class="sec-sub">Compare your resume against 3 jobs — find your best fit instantly</div></div>', unsafe_allow_html=True)
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown('<div class="job-col-header">🏢 Job 1</div>', unsafe_allow_html=True)
+            t1 = st.text_input("Title 1", placeholder="e.g. Python Developer", key="t1", label_visibility="collapsed")
+            d1 = st.text_area("JD 1", height=180, key="d1", placeholder="Paste job description 1…", label_visibility="collapsed")
+        with c2:
+            st.markdown('<div class="job-col-header">🏢 Job 2</div>', unsafe_allow_html=True)
+            t2 = st.text_input("Title 2", placeholder="e.g. Data Analyst", key="t2", label_visibility="collapsed")
+            d2 = st.text_area("JD 2", height=180, key="d2", placeholder="Paste job description 2…", label_visibility="collapsed")
+        with c3:
+            st.markdown('<div class="job-col-header">🏢 Job 3 (Optional)</div>', unsafe_allow_html=True)
+            t3 = st.text_input("Title 3", placeholder="e.g. ML Engineer", key="t3", label_visibility="collapsed")
+            d3 = st.text_area("JD 3", height=180, key="d3", placeholder="Paste job description 3…", label_visibility="collapsed")
+        if st.button("🔀 Compare All Jobs", use_container_width=True, key="btn_matcher"):
+            if check_ready():
+                if not d1.strip() or not d2.strip():
+                    st.warning("Please fill in at least Job 1 and Job 2")
+                else:
+                    jobs = [{"title": t1 or "Job 1", "desc": d1},
+                            {"title": t2 or "Job 2", "desc": d2}]
+                    if d3.strip(): jobs.append({"title": t3 or "Job 3", "desc": d3})
+                    with st.spinner("Comparing jobs… (~20 seconds)"):
+                        result = multi_job_match(st.session_state.resume_text, jobs)
+                    st.markdown(result)
+                    st.divider()
+                    st.download_button("⬇️ Download Comparison", result, "job_comparison.txt", use_container_width=True)
+
+    # ── TAB 7: RAG CHAT ───────────────────────────────────────────────────
+    with tabs[6]:
+        st.markdown('<div class="sec-header"><div class="sec-title">💬 Chat With Your Resume</div><div class="sec-sub">Ask anything — AI answers based only on your document</div></div>', unsafe_allow_html=True)
         st.divider()
 
-        col_left, col_right = st.columns(2)
+        if not st.session_state.rag_ready:
+            st.info("⬅️ Upload your resume in the sidebar to activate the chat")
+        else:
+            st.success("✅ Resume loaded — AI is ready to answer your questions")
+            st.markdown("**💡 Quick questions:**")
+            chips = ["What are my top skills?", "Summarise my experience",
+                     "My strongest achievement?", "Best roles for me?"]
+            cols = st.columns(4)
+            for col, chip in zip(cols, chips):
+                with col:
+                    if st.button(chip, key=f"chip_{chip}"):
+                        st.session_state._chip = chip
+            st.divider()
 
-        with col_left:
-            st.markdown("#### 📄 Your Resume")
-            resume_file = st.file_uploader(
-                "Upload Resume (PDF or TXT)",
-                type=["pdf", "txt"],
-                key="ats_resume",
-            )
-            if resume_file:
-                st.success(f"✅ Uploaded: {resume_file.name}")
+            for msg in st.session_state.display_history:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-        with col_right:
-            st.markdown("#### 📋 Job Description")
-            job_desc = st.text_area(
-                "Paste the full job description here",
-                height=280,
-                key="ats_jd",
-                placeholder="Paste the job description you are applying for…",
-            )
+            user_input = st.chat_input("Ask anything about your resume…")
+            if "_chip" in st.session_state:
+                user_input = st.session_state.pop("_chip")
 
-        st.divider()
-        run_ats = st.button("🔍 Analyse ATS Match", use_container_width=True, key="ats_btn")
+            if user_input:
+                st.session_state.display_history.append({"role": "user", "content": user_input})
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking…"):
+                        try:
+                            answer = st.session_state.rag_chain.invoke({
+                                "question": user_input,
+                                "chat_history": st.session_state.chat_history,
+                            })
+                        except Exception as e:
+                            answer = f"❌ Error: {e}"
+                    st.markdown(answer)
+                st.session_state.chat_history.append(HumanMessage(content=user_input))
+                st.session_state.chat_history.append(AIMessage(content=answer))
+                st.session_state.display_history.append({"role": "assistant", "content": answer})
 
-        if run_ats:
-            if not api_key:
-                st.error("⚠️ No Groq API Key. Add GROQ_API_KEY to your .env file.")
-            elif not resume_file:
-                st.warning("⚠️ Please upload your resume (PDF or TXT).")
-            elif not job_desc.strip():
-                st.warning("⚠️ Please paste the job description.")
-            else:
-                # Extract resume text
-                with st.spinner("Reading resume…"):
-                    suffix = os.path.splitext(resume_file.name)[-1].lower()
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                        tmp.write(resume_file.getbuffer())
-                        tmp_path = tmp.name
-                    resume_docs = load_pdf(tmp_path) if suffix == ".pdf" else load_text(tmp_path)
-                    resume_text = "\n".join(d.page_content for d in resume_docs)
-
-                with st.spinner("🤖 Analysing with AI… (this takes ~10 seconds)"):
-                    try:
-                        ats_result = run_ats_analysis(resume_text, job_desc, api_key)
-                    except Exception as e:
-                        ats_result = f"❌ Error during analysis: {e}"
-
-                st.divider()
-
-                # Extract score and show big visual
-                score_match = re.search(r'(\d{1,3})\s*%', ats_result)
-                if score_match:
-                    score = int(score_match.group(1))
-                    score = min(score, 100)
-
-                    if score >= 70:
-                        color  = "#4caf50"
-                        emoji  = "🟢"
-                        grade  = "Strong Match"
-                        bg     = "#0d2b0d"
-                    elif score >= 40:
-                        color  = "#ff9800"
-                        emoji  = "🟡"
-                        grade  = "Moderate Match"
-                        bg     = "#2b1e0d"
-                    else:
-                        color  = "#f44336"
-                        emoji  = "🔴"
-                        grade  = "Weak Match"
-                        bg     = "#2b0d0d"
-
-                    # Score card
-                    st.markdown(f"""
-                    <div style="text-align:center; padding:32px; border-radius:16px;
-                                background:{bg}; border:2px solid {color}; margin-bottom:24px;">
-                        <div style="font-size:72px; line-height:1;">{emoji} {score}%</div>
-                        <div style="font-size:22px; color:{color}; font-weight:700;
-                                    margin-top:8px;">{grade}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # Progress bar
-                    st.progress(score / 100)
-                    st.markdown("")
-
-                # Full AI analysis
-                st.markdown(ats_result)
-
-                # Download button
-                st.divider()
-                st.download_button(
-                    label="⬇️ Download ATS Report",
-                    data=ats_result,
-                    file_name="ats_report.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
+            if st.session_state.display_history:
+                if st.button("🗑️ Clear Chat", key="clear_chat"):
+                    st.session_state.chat_history    = []
+                    st.session_state.display_history = []
+                    st.rerun()
 
 # =============================================================================
 #  ENTRY POINT  →  streamlit run main.py
