@@ -12,3 +12,6 @@ faiss-cpu==1.13.2
 pypdf==5.1.0
 beautifulsoup4
 groq
+Pillow
+pytesseract
+numpy
