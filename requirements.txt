@@ -1,6 +1,7 @@
 streamlit
 python-dotenv
 langchain==0.3.25
+langsmith==0.3.44
 langchain-core
 langchain-community
 langchain-text-splitters
