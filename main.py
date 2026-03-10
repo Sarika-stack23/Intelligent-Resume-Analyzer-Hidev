@@ -29,7 +29,10 @@ from langchain_groq import ChatGroq
 load_dotenv()
 
 # ── macOS: point pytesseract to Homebrew Tesseract binary ──
-pytesseract.pytesseract.tesseract_cmd = "/opt/homebrew/bin/tesseract"
+import shutil
+tesseract_path = shutil.which("tesseract")
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
 EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"
